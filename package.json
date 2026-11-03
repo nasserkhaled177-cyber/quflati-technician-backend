@@ -1,0 +1,30 @@
+{
+  "name": "quflati-technician-backend",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.0.3",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.0",
+    "multer": "^2.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0",
+    "prisma": "^5.22.0"
+  },
+  "description": "",
+  "keywords": [],
+  "type": "commonjs",
+  "allowScripts": {
+    "@prisma/engines@5.22.0": true,
+    "@prisma/client@5.22.0": true,
+    "prisma@5.22.0": true
+  }
+}

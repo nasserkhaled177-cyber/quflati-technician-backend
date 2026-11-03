@@ -1,0 +1,98 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+model InstallationRequest {
+  id             String   @id @default(cuid())
+  orderNumber    String   @unique
+  customerName   String
+  customerPhone  String
+  city           String
+  address        String
+  googleLink     String?
+  latitude       Float
+  longitude      Float
+  note           String?
+  paymentMethod  String
+  type           String
+  media          String
+  status         String   @default("جارية")
+  technicianId   String?
+  technician     Technician? @relation(fields: [technicianId], references: [id])
+  createdAt      DateTime @default(now())
+}
+
+model Technician {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  password  String   @default("123456")
+  lat       Float?
+  lng       Float?
+  city      String   @default("صنعاء")
+  specialty String?  @default("عام")
+  rating    Float    @default(5)
+  isOnline  Boolean  @default(true)
+  status    String   @default("متاح")
+  totalJobs Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  jobs      InstallationRequest[]
+}
+
+model Offer {
+  id           String   @id @default(cuid())
+  requestId    String
+  technicianId String
+  price        Float
+  arrivalTime  String
+  expiresAt    DateTime
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+}
+
+model DoorType {
+  id        String   @id @default(cuid())
+  name      String
+  thickness String?
+  minSize   Int      @default(0)
+  maxSize   Int      @default(100)
+  image     String?
+  createdAt DateTime @default(now())
+}
+
+model LockProduct {
+  id           String   @id @default(cuid())
+  name         String
+  desc         String?
+  price        Float    @default(0)
+  installPrice Float    @default(0)
+  minSize      Int      @default(0)
+  maxSize      Int      @default(100)
+  compatible   String?
+  image        String?
+  createdAt    DateTime @default(now())
+}
+
+model Addition {
+  id           String   @id @default(cuid())
+  title        String
+  installPrice Float
+  doorTypeId   String
+  taxNote      String?
+  createdAt    DateTime @default(now())
+}
+
+model ReadyItem {
+  id        String   @id @default(cuid())
+  lock      String?
+  door      String?
+  add       String?
+  price     Float?
+  lockId    String?
+  doorId    String?
+  image     String?
+  keywords  String?
+  adds      String?
+  createdAt DateTime @default(now())
+}
