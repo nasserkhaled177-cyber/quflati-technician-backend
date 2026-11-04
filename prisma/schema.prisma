@@ -1,3 +1,7 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -8,6 +12,9 @@ model InstallationRequest {
   customerName   String
   customerPhone  String
   city           String
+  country        String   @default("")
+  countryCode    String   @default("")
+  province       String   @default("")
   address        String
   googleLink     String?
   latitude       Float
@@ -30,6 +37,9 @@ model Technician {
   lat       Float?
   lng       Float?
   city      String   @default("صنعاء")
+  country   String   @default("")
+  countryCode String @default("")
+  province  String   @default("")
   specialty String?  @default("عام")
   rating    Float    @default(5)
   isOnline  Boolean  @default(true)
@@ -95,4 +105,17 @@ model ReadyItem {
   keywords  String?
   adds      String?
   createdAt DateTime @default(now())
+}
+
+model Supervisor {
+  id          String   @id @default(cuid())
+  name        String
+  user        String   @unique
+  pass        String   @default("123456")
+  country     String   @default("اليمن")
+  countryCode String   @default("YE")
+  province    String   @default("عدن")
+  city        String   @default("عدن")
+  status      String   @default("نشط")
+  createdAt   DateTime @default(now())
 }

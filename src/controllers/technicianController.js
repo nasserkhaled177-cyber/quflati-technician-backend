@@ -4,7 +4,7 @@ const { findTechnician } = require("../utils/technicianMatcher");
 // الفني يشوف الطلبات المخصصة له في الرياض
 exports.myAssigned = async (req,res)=>{
   const bookings = await prisma.booking.findMany({
-    where:{ technicianId: req.user.id, city:"Riyadh" },
+    where:{ technicianId: req.user.id },
     include:{ order:{ include:{ items:{ include:{product:true}}}}},
     orderBy:{createdAt:'desc'}
   });
@@ -21,5 +21,5 @@ exports.completeJob = async (req,res)=>{
   });
   // قفل الاوردر الاساسي
   await prisma.order.update({ where:{id: updated.orderId}, data:{ status:"COMPLETED" }});
-  res.json({ message: "Job completed - Riyadh ✅", booking: updated });
+  res.json({ message: "Job completed ✅", booking: updated });
 };

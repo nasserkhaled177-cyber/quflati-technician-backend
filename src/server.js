@@ -8,10 +8,34 @@ const { PrismaClient } = require("@prisma/client")
 const app = express()
 const prisma = new PrismaClient()
 const PORT = process.env.PORT || 3002
+
 app.use(cors({ origin: "*" }))
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+
+// --- Scope Helper: فلترة حسب الدولة والمحافظة ---
+// الادمن: بدون query = يشوف الكل
+// المشرف: يرسل ?countryCode=YE&province=عدن = يشوف محافظته بس
+function buildScope(req){
+  const { countryCode, province, city, country } = req.query || {};
+  const where = {};
+  if(countryCode) where.countryCode = String(countryCode);
+  else if(country) where.countryCode = String(country);
+  if(province) where.province = String(province);
+  else if(city) where.province = String(city);
+  return where;
+}
+function buildTechnicianScope(req){
+  const { countryCode, province, city, country } = req.query || {};
+  const where = {};
+  if(countryCode) where.countryCode = String(countryCode);
+  else if(country) where.countryCode = String(country);
+  if(province) where.province = String(province);
+  else if(city) where.city = String(city);
+  return where;
+}
+
 
 const storage = multer.diskStorage({
   destination: (req,file,cb)=> {
@@ -34,7 +58,7 @@ function getDistance(lat1, lon1, lat2, lon2) {
 // ===== 1. الطلبات =====
 app.post("/api/installation-requests", upload.array("media", 10), async (req,res)=>{
   try{
-    const { city, address, googleLink, latitude, longitude, note, paymentMethod, type, customerName, customerPhone } = req.body
+    const { city, address, googleLink, latitude, longitude, note, paymentMethod, type, customerName, customerPhone, countryCode, province, country } = req.body
     const media = (req.files||[]).map(f=>`/uploads/${f.filename}`)
     const orderNumber = "QF-"+Date.now().toString().slice(-6)
     const request = await prisma.installationRequest.create({
@@ -43,6 +67,8 @@ app.post("/api/installation-requests", upload.array("media", 10), async (req,res
         customerName: customerName || "عميل قفلاتي",
         customerPhone: customerPhone || "777000000",
         city, address, googleLink,
+        countryCode: countryCode || country || "YE",
+        province: province || city || "عدن",
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         note, paymentMethod, type,
@@ -54,9 +80,11 @@ app.post("/api/installation-requests", upload.array("media", 10), async (req,res
   }catch(e){ console.error(e); res.status(500).json({ error: e.message }) }
 })
 
+app.get("/api/requests", async (req,res)=>{ try{ const where = buildScope(req); const rows = await prisma.installationRequest.findMany({ where, orderBy:{ createdAt:"desc" } }); res.json(rows); }catch(e){ res.status(500).json({error:e.message}) } });
 app.get("/api/technician/requests", async (req,res)=>{
   const { lat, lng, radius=50 } = req.query
-  const all = await prisma.installationRequest.findMany({ where:{ status:"جارية" }, orderBy:{ createdAt:"desc" } })
+  const scope = buildScope(req)
+  const all = await prisma.installationRequest.findMany({ where:{ status:"جارية", ...scope }, orderBy:{ createdAt:"desc" } })
   const filtered = all.map(r=>{
     if(!lat || !lng) return { ...r, distance: "قريب" }
     const d = getDistance(parseFloat(lat), parseFloat(lng), r.latitude, r.longitude)
@@ -68,7 +96,7 @@ app.get("/api/technician/requests", async (req,res)=>{
 app.get("/api/installation-requests", async (req,res)=>{
   const { phone } = req.query
   const where = phone ? { customerPhone: phone } : {}
-  const requests = await prisma.installationRequest.findMany({ where, orderBy:{ createdAt:"desc" } })
+  const requests = await prisma.installationRequest.findMany({ where: { ...buildScope(req), ...where }, orderBy:{ createdAt:"desc" } })
   res.json(requests)
 })
 
@@ -76,56 +104,39 @@ app.put("/api/installation-requests/:id/accept", async (req,res)=>{
   const { id } = req.params
   const { technicianId } = req.body
   const updated = await prisma.installationRequest.update({ where:{ id }, data:{ status:"مقبولة", technicianId } })
-  try{ await prisma.technician.update({ where:{ id: technicianId }, data:{ totalJobs: { increment: 1 }, status: "شغال" }}) }catch{}
+  // تحديث عدد شغل الفني
+  try{ await prisma.technician.update({ where:{ id: technicianId }, data:{ totalJobs: { increment: 1 }, isBusy: true }}) }catch{}
   res.json(updated)
 })
 
-app.put("/api/installation-requests/:id/complete", async (req,res)=>{
-  const { id } = req.params
-  const updated = await prisma.installationRequest.update({ where:{ id }, data:{ status:"مكتملة" } })
-  if(updated.technicianId){
-    try{ await prisma.technician.update({ where:{ id: updated.technicianId }, data:{ status: "متاح" }}) }catch{}
-  }
-  res.json(updated)
-})
-
-// ===== 2. كتالوج الابواب =====
+// ===== 2. كتالوج الابواب والاقفال =====
 app.post("/api/catalog/door", upload.single("image"), async (req,res)=>{
-  try{
-    const { name, thickness, minSize, maxSize, doorType } = req.body
-    const image = req.file ? `/uploads/${req.file.filename}` : (req.body.image || null)
-    const door = await prisma.doorType.create({ data:{ name: name || doorType, thickness, minSize:parseInt(minSize||0), maxSize:parseInt(maxSize||100), image } })
-    res.json(door)
-  }catch(e){ res.status(500).json({ error: e.message }) }
+  const { name, thickness, minSize, maxSize } = req.body
+  const image = req.file ? `/uploads/${req.file.filename}` : null
+  const door = await prisma.doorType.create({ data:{ name, thickness, minSize:parseInt(minSize), maxSize:parseInt(maxSize), image } })
+  res.json(door)
 })
 app.post("/api/catalog/doors", upload.single("image"), async (req,res)=>{
-  try{
-    const { name, thickness, minSize, maxSize, doorType } = req.body
-    const image = req.file ? `/uploads/${req.file.filename}` : (req.body.image || null)
-    const door = await prisma.doorType.create({ data:{ name: name || doorType, thickness, minSize:parseInt(minSize||0), maxSize:parseInt(maxSize||100), image } })
-    res.json(door)
-  }catch(e){ res.status(500).json({ error: e.message }) }
+  const { name, thickness, minSize, maxSize, doorType } = req.body
+  const image = req.file ? `/uploads/${req.file.filename}` : null
+  const door = await prisma.doorType.create({ data:{ name: name || doorType, thickness, minSize:parseInt(minSize||0), maxSize:parseInt(maxSize||100), image } })
+  res.json(door)
 })
 app.get("/api/catalog/doors", async (req,res)=>{ res.json(await prisma.doorType.findMany({ orderBy:{ createdAt:"desc" }})) })
 app.delete("/api/catalog/door/:id", async (req,res)=>{ await prisma.doorType.delete({ where:{ id:req.params.id } }); res.json({ok:true}) })
 app.delete("/api/catalog/doors/:id", async (req,res)=>{ await prisma.doorType.delete({ where:{ id:req.params.id } }); res.json({ok:true}) })
 
-// ===== 3. كتالوج الاقفال =====
 app.post("/api/catalog/lock", upload.single("image"), async (req,res)=>{
-  try{
-    const { name, desc, price, productPrice, installPrice, minSize, maxSize, compatible } = req.body
-    const image = req.file ? `/uploads/${req.file.filename}` : (req.body.image || null)
-    const lock = await prisma.lockProduct.create({ data:{ name, desc, price:parseFloat(price||productPrice||0), installPrice:parseFloat(installPrice||0), minSize:parseInt(minSize||0), maxSize:parseInt(maxSize||100), compatible, image } })
-    res.json(lock)
-  }catch(e){ res.status(500).json({ error: e.message }) }
+  const { name, desc, price, installPrice, minSize, maxSize, compatible } = req.body
+  const image = req.file ? `/uploads/${req.file.filename}` : null
+  const lock = await prisma.lockProduct.create({ data:{ name, desc, price:parseFloat(price), installPrice:parseFloat(installPrice), minSize:parseInt(minSize), maxSize:parseInt(maxSize), compatible, image } })
+  res.json(lock)
 })
 app.post("/api/catalog/locks", upload.single("image"), async (req,res)=>{
-  try{
-    const { name, desc, price, productPrice, installPrice, minSize, maxSize, compatible } = req.body
-    const image = req.file ? `/uploads/${req.file.filename}` : (req.body.image || null)
-    const lock = await prisma.lockProduct.create({ data:{ name, desc, price:parseFloat(price||productPrice||0), installPrice:parseFloat(installPrice||0), minSize:parseInt(minSize||0), maxSize:parseInt(maxSize||100), compatible, image } })
-    res.json(lock)
-  }catch(e){ res.status(500).json({ error: e.message }) }
+  const { name, desc, price, installPrice, minSize, maxSize, compatible, productPrice } = req.body
+  const image = req.file ? `/uploads/${req.file.filename}` : null
+  const lock = await prisma.lockProduct.create({ data:{ name, desc, price:parseFloat(price||productPrice||0), installPrice:parseFloat(installPrice||0), minSize:parseInt(minSize||0), maxSize:parseInt(maxSize||100), compatible, image } })
+  res.json(lock)
 })
 app.get("/api/catalog/locks", async (req,res)=>{
   const { doorSize } = req.query
@@ -136,37 +147,27 @@ app.get("/api/catalog/locks", async (req,res)=>{
 app.delete("/api/catalog/lock/:id", async (req,res)=>{ await prisma.lockProduct.delete({ where:{ id:req.params.id } }); res.json({ok:true}) })
 app.delete("/api/catalog/locks/:id", async (req,res)=>{ await prisma.lockProduct.delete({ where:{ id:req.params.id } }); res.json({ok:true}) })
 
-// ===== 4. إضافات =====
+// ===== 3. الاضافات =====
 app.post("/api/catalog/addition", async (req,res)=>{
-  try{
-    const { title, installPrice, doorTypeId, doorId, taxNote } = req.body
-    const add = await prisma.addition.create({ data:{ title, installPrice:parseFloat(installPrice||0), doorTypeId: doorTypeId || doorId || "general", taxNote } })
-    res.json(add)
-  }catch(e){ res.status(500).json({ error: e.message }) }
+  const { title, installPrice, doorTypeId, taxNote, doorId } = req.body
+  const add = await prisma.addition.create({ data:{ title, installPrice:parseFloat(installPrice||0), doorTypeId: doorTypeId || doorId || "general", taxNote } })
+  res.json(add)
 })
 app.post("/api/catalog/additions", async (req,res)=>{
-  try{
-    const { title, installPrice, doorTypeId, doorId, taxNote } = req.body
-    const add = await prisma.addition.create({ data:{ title, installPrice:parseFloat(installPrice||0), doorTypeId: doorTypeId || doorId || "general", taxNote } })
-    res.json(add)
-  }catch(e){ res.status(500).json({ error: e.message }) }
+  const { title, installPrice, doorTypeId, taxNote, doorId } = req.body
+  const add = await prisma.addition.create({ data:{ title, installPrice:parseFloat(installPrice||0), doorTypeId: doorTypeId || doorId || "general", taxNote } })
+  res.json(add)
 })
 app.get("/api/catalog/additions", async (req,res)=>{ res.json(await prisma.addition.findMany({ orderBy:{ createdAt:"desc" }})) })
 app.delete("/api/catalog/addition/:id", async (req,res)=>{ await prisma.addition.delete({ where:{ id:req.params.id } }); res.json({ok:true}) })
 app.delete("/api/catalog/additions/:id", async (req,res)=>{ await prisma.addition.delete({ where:{ id:req.params.id } }); res.json({ok:true}) })
 
-// ===== 5. الجاهز للمتجر العام =====
+// ===== 4. الجاهز للمتجر العام =====
 app.get("/api/catalog/ready", async (req,res)=>{ res.json(await prisma.readyItem.findMany({ orderBy:{ createdAt:"desc" }})) })
-app.post("/api/catalog/ready", async (req,res)=>{
-  try{ const item = await prisma.readyItem.create({ data: req.body }); res.json(item) }catch(e){ res.status(500).json({ error: e.message }) }
-})
-app.post("/api/catalog", async (req,res)=>{
-  try{ const item = await prisma.readyItem.create({ data: req.body }); res.json(item) }catch(e){ res.status(500).json({ error: e.message }) }
-})
+app.post("/api/catalog/ready", async (req,res)=>{ const item = await prisma.readyItem.create({ data: req.body }); res.json(item) })
+app.post("/api/catalog", async (req,res)=>{ const item = await prisma.readyItem.create({ data: req.body }); res.json(item) })
 app.delete("/api/catalog/ready/:id", async (req,res)=>{ await prisma.readyItem.delete({ where:{ id:req.params.id }}); res.json({ok:true}) })
-app.delete("/api/catalog/:id", async (req,res)=>{ await prisma.readyItem.delete({ where:{ id:req.params.id }}); res.json({ok:true}) })
 
-// ===== 6. مطابقة اقفال حسب السماكة =====
 app.post("/api/match-locks", async (req,res)=>{
   const { thickness } = req.body
   const s = parseInt(thickness)
@@ -175,97 +176,52 @@ app.post("/api/match-locks", async (req,res)=>{
   res.json(matched)
 })
 
-// ===== 7. الفنيين =====
+// ===== 5. الفنيين - جديد =====
 app.get("/api/technicians", async (req,res)=>{
-  const techs = await prisma.technician.findMany({ orderBy:{ createdAt:"desc" }})
+  const techs = await prisma.technician.findMany({ where: buildTechnicianScope(req), orderBy:{ totalJobs:"desc" } }).catch(()=>[])
   res.json(techs)
 })
 app.get("/api/technicians/locations", async (req,res)=>{
-  const techs = await prisma.technician.findMany({ where:{ lat:{ not: null }, lng:{ not: null }}})
+  const techs = await prisma.technician.findMany({ where: buildTechnicianScope(req), select:{ id:true, name:true, phone:true, latitude:true, longitude:true, status:true, isAvailable:true, isBusy:true, totalJobs:true, rating:true } }).catch(()=>[])
   res.json(techs)
 })
-app.post("/api/technicians", async (req,res)=>{
-  try{
-    const tech = await prisma.technician.create({ data: req.body })
-    res.json(tech)
-  }catch(e){ res.status(500).json({ error: e.message }) }
-})
-app.put("/api/technicians/:id/location", async (req,res)=>{
-  const { id } = req.params
-  const { lat, lng, city, status, isOnline } = req.body
-  const tech = await prisma.technician.update({ where:{ id }, data:{ lat: lat?parseFloat(lat):undefined, lng: lng?parseFloat(lng):undefined, city, status, isOnline }})
-  res.json(tech)
-})
 
-// ===== 8. الداشبورد الشامل - يظهر في http://localhost:3002/ =====
+// ===== 6. الداشبورد الشامل - هذا اللي يطلع في / =====
 app.get("/", async (req,res)=>{
-  try{
-    const [requests, techs, doors, locks, adds, ready] = await Promise.all([
-      prisma.installationRequest.findMany({ orderBy:{ createdAt:"desc" }}),
-      prisma.technician.findMany({ orderBy:{ createdAt:"desc" }}),
-      prisma.doorType.findMany({ orderBy:{ createdAt:"desc" }}),
-      prisma.lockProduct.findMany({ orderBy:{ createdAt:"desc" }}),
-      prisma.addition.findMany({ orderBy:{ createdAt:"desc" }}),
-      prisma.readyItem.findMany({ orderBy:{ createdAt:"desc" }}),
-    ])
+  const [requests, techs, doors, locks, adds, ready] = await Promise.all([
+    prisma.installationRequest.findMany({ orderBy:{ createdAt:"desc" }}).catch(()=>[]),
+    prisma.technician.findMany().catch(()=>[]),
+    prisma.doorType.findMany().catch(()=>[]),
+    prisma.lockProduct.findMany().catch(()=>[]),
+    prisma.addition.findMany().catch(()=>[]),
+    prisma.readyItem.findMany().catch(()=>[]),
+  ])
 
-    const stats = {
-      الطلبات: {
-        الكل: requests.length,
-        جارية: requests.filter(r=>r.status==="جارية").length,
-        مقبولة: requests.filter(r=>r.status==="مقبولة").length,
-        مكتملة: requests.filter(r=>r.status==="مكتملة").length,
-      },
-      الفنيين: {
-        الكل: techs.length,
-        متاح: techs.filter(t=> t.status==="متاح" && t.isOnline).length,
-        شغال: techs.filter(t=> t.status==="شغال").length,
-        غير_متاح: techs.filter(t=> !t.isOnline || t.status==="غير متاح").length,
-        القائمة: techs.map(t=>({
-          id: t.id,
-          name: t.name,
-          phone: t.phone,
-          city: t.city,
-          status: t.status,
-          isOnline: t.isOnline,
-          موقع: t.lat ? `${t.lat},${t.lng}` : "لا يوجد",
-          googleMaps: t.lat ? `https://maps.google.com/?q=${t.lat},${t.lng}` : null,
-          تقييم: t.rating,
-          اشتغل: t.totalJobs,
-          تخصص: t.specialty
-        }))
-      },
-      الكتالوج: {
-        ابواب: doors.length,
-        اقفال: locks.length,
-        اضافات: adds.length,
-        جاهز: ready.length
-      },
-      مواقع_الطلبات: requests.map(r=>({
-        orderNumber: r.orderNumber,
-        city: r.city,
-        lat: r.latitude,
-        lng: r.longitude,
-        googleLink: `https://maps.google.com/?q=${r.latitude},${r.longitude}`,
-        status: r.status,
-        technicianId: r.technicianId
+  const stats = {
+    الطلبات: {
+      الكل: requests.length,
+      جارية: requests.filter(r=>r.status==="جارية").length,
+      مقبولة: requests.filter(r=>r.status==="مقبولة").length,
+      مكتملة: requests.filter(r=>r.status==="مكتملة").length,
+    },
+    الفنيين: {
+      الكل: techs.length,
+      متاح: techs.filter(t=>t.status==="متاح" || t.isAvailable).length,
+      شغال: techs.filter(t=>t.status==="شغال" || t.isBusy).length,
+      غير_متاح: techs.filter(t=>t.status==="غير متاح" || !t.isAvailable).length,
+      تفاصيل: techs.map(t=>({
+        id: t.id, name: t.name, phone: t.phone,
+        status: t.status, متاح: t.isAvailable, شغال: t.isBusy,
+        موقع: t.latitude ? `${t.latitude},${t.longitude}` : "لا يوجد",
+        اشتغل: t.totalJobs || 0,
+        تقييم: t.rating || 5
       }))
-    }
-
-    res.json({
-      ok: true,
-      message: "🚀 باكند قفلاتي شغال - لوحة التحكم الشاملة",
-      time: new Date().toISOString(),
-      stats,
-      endpoints: {
-        catalog: ["/api/catalog/doors","/api/catalog/locks","/api/catalog/additions","/api/catalog/ready"],
-        requests: ["/api/installation-requests","/api/technician/requests?lat=24.7136&lng=46.6753"],
-        technicians: ["/api/technicians","/api/technicians/locations"]
-      }
-    })
-  }catch(e){
-    res.status(500).json({ ok:false, error: e.message, stack: e.stack })
+    },
+    الكتالوج: { ابواب: doors.length, اقفال: locks.length, اضافات: adds.length, جاهز: ready.length },
+    مواقع_الطلبات: requests.map(r=>({ orderNumber:r.orderNumber, city:r.city, lat:r.latitude, lng:r.longitude, status:r.status }))
   }
+
+  res.json({ ok:true, message:"🚀 باكند قفلاتي - كل شي", stats })
 })
 
 app.listen(PORT, "0.0.0.0", ()=> console.log(`🚀 فني باكند شغال http://0.0.0.0:${PORT}`))
