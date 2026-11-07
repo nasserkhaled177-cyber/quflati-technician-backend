@@ -6,19 +6,20 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 model InstallationRequest {
   id             String   @id @default(cuid())
   orderNumber    String   @unique
   customerName   String
   customerPhone  String
-  city           String
-  country        String   @default("")
-  countryCode    String   @default("")
-  province       String   @default("")
+  city           String?
+  country        String?
+  countryCode    String?
+  province       String?
   address        String
   googleLink     String?
-  latitude       Float
-  longitude      Float
+  latitude       Float?
+  longitude      Float?
   note           String?
   paymentMethod  String
   type           String
@@ -30,24 +31,24 @@ model InstallationRequest {
 }
 
 model Technician {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String   @unique
-  password  String   @default("123456")
-  lat       Float?
-  lng       Float?
-  city      String   @default("صنعاء")
-  country   String   @default("")
-  countryCode String @default("")
-  province  String   @default("")
-  specialty String?  @default("عام")
-  rating    Float    @default(5)
-  isOnline  Boolean  @default(true)
-  status    String   @default("متاح")
-  totalJobs Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
-  jobs      InstallationRequest[]
+  id          String   @id @default(cuid())
+  name        String
+  phone       String   @unique
+  password    String   @default("123456")
+  lat         Float?
+  lng         Float?
+  city        String?
+  country     String?
+  countryCode String?
+  province    String?
+  specialty   String?  @default("عام")
+  rating      Float    @default(5)
+  isOnline    Boolean  @default(true)
+  status      String   @default("متاح")
+  totalJobs   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  jobs        InstallationRequest[]
 }
 
 model Offer {
@@ -112,10 +113,10 @@ model Supervisor {
   name        String
   user        String   @unique
   pass        String   @default("123456")
-  country     String   @default("اليمن")
-  countryCode String   @default("YE")
-  province    String   @default("عدن")
-  city        String   @default("عدن")
+  country     String?
+  countryCode String?
+  province    String?
+  city        String?
   status      String   @default("نشط")
   createdAt   DateTime @default(now())
 }
