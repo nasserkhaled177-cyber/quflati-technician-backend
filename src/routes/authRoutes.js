@@ -1,4 +1,9 @@
 const express = require('express');
+const jwt = require("jsonwebtoken");
+const SECRET = process.env.JWT_SECRET || "quflati-secret-change-me";
+function makeTechToken(tech){
+  return jwt.sign({ id: tech.id, name: tech.name, phone: tech.phone, email: tech.email || "", role: "technician" }, SECRET, { expiresIn: "7d" });
+}
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { PrismaClient } = require('@prisma/client');
@@ -20,7 +25,8 @@ router.post('/technician/register', async (req,res)=>{
     const tech = await prisma.technician.create({
       data:{ name:name||'فني', phone, password:hashed, city: city||'Riyadh', specialty: specialty||'عام', lat, lng }
     });
-    res.json({ok:true, user:tech});
+    const token = makeTechToken(tech);
+    res.json({ok:true, token, user:tech});
   }catch(e){ console.error(e); res.status(500).json({error:e.message}) }
 });
 
@@ -34,7 +40,8 @@ router.post('/register', async (req,res)=>{
     const tech = await prisma.technician.create({
       data:{ name:name||'فني', phone, password:hashed, city: city||'Riyadh', specialty: specialty||'عام', lat, lng }
     });
-    res.json({ok:true, user:tech});
+    const token = makeTechToken(tech);
+    res.json({ok:true, token, user:tech});
   }catch(e){ console.error(e); res.status(500).json({error:e.message}) }
 });
 

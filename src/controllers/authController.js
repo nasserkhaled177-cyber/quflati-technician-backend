@@ -38,7 +38,7 @@ exports.login = async (req, res) => {
     }
     
     if (!valid) return res.status(401).json({ message: "Wrong password" });
-    const token = jwt.sign({ id: tech.id, phone: tech.phone }, process.env.JWT_SECRET || "quflaty_secret_2026", { expiresIn: "7d" });
+    const token = jwt.sign({ id: tech.id, name: tech.name, phone: tech.phone, email: tech.email || "", role: "technician" }, process.env.JWT_SECRET || "quflati-secret-change-me", { expiresIn: "7d" });
     res.json({ token, id: tech.id, name: tech.name, phone: tech.phone, city: tech.city });
   } catch (e) {
     console.error(e);

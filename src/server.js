@@ -4,6 +4,7 @@ const multer = require("multer")
 const path = require("path")
 const fs = require("fs")
 const { PrismaClient } = require("@prisma/client")
+const jwt = require("jsonwebtoken")
 
 const app = express()
 const prisma = new PrismaClient()
@@ -55,17 +56,40 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 }
 
-// ===== 1. الطلبات =====
-app.post("/api/installation-requests", upload.array("media", 10), async (req,res)=>{
+// --- Auth Required: إجباري - لازم توكن حقيقي ---
+function authRequired(req, res, next){
+  const h = req.headers.authorization || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+  if(!token) return res.status(401).json({ success:false, error: "لازم تسجل دخول أولاً" });
   try{
-    const { city, address, googleLink, latitude, longitude, note, paymentMethod, type, customerName, customerPhone, countryCode, province, country } = req.body
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "quflati-secret-change-me");
+    // ندعم كل أشكال التوكن: id / userId / _id
+    req.user = {
+      id: decoded.id || decoded.userId || decoded._id,
+      name: decoded.name || decoded.customerName || decoded.username,
+      phone: decoded.phone || decoded.customerPhone || decoded.mobile,
+      email: decoded.email,
+    };
+    if(!req.user.id || !req.user.name) return res.status(401).json({ success:false, error: "التوكن ناقص بيانات العميل" });
+    next();
+  }catch(e){ return res.status(401).json({ success:false, error: "التوكن منتهي أو غير صالح، سجل دخول من جديد" }); }
+}
+
+// ===== 1. الطلبات =====
+app.post("/api/installation-requests", authRequired, upload.array("media", 10), async (req,res)=>{
+  try{
+    const { city, address, googleLink, latitude, longitude, note, paymentMethod, type, countryCode, province, country } = req.body
+    const realName = req.user.name
+    const realPhone = req.user.phone
+    const realEmail = req.user.email || null
+    const realUserId = req.user.id
     const media = (req.files||[]).map(f=>`/uploads/${f.filename}`)
     const orderNumber = "QF-"+Date.now().toString().slice(-6)
     const request = await prisma.installationRequest.create({
       data: {
         orderNumber,
-        customerName: customerName || "عميل قفلاتي",
-        customerPhone: customerPhone || "777000000",
+        customerName: realName,
+        customerPhone: realPhone,
         city, address, googleLink,
         countryCode: countryCode || country || "YE",
         province: province || city || "عدن",
@@ -75,7 +99,7 @@ app.post("/api/installation-requests", upload.array("media", 10), async (req,res
         media: JSON.stringify(media)
       }
     })
-    console.log("✅ طلب جديد:", orderNumber)
+    console.log("✅ طلب جديد:", orderNumber, "من:", realName, realPhone, `(userId:${realUserId})`)
     res.json({ success:true, orderNumber, request })
   }catch(e){ console.error(e); res.status(500).json({ error: e.message }) }
 })
