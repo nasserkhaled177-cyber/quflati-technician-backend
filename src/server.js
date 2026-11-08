@@ -224,4 +224,6 @@ app.get("/", async (req,res)=>{
   res.json({ ok:true, message:"🚀 باكند قفلاتي - كل شي", stats })
 })
 
+app.use(require("./routes/index"))
+app.use("/auth", require("./routes/authRoutes"))
 app.listen(PORT, "0.0.0.0", ()=> console.log(`🚀 فني باكند شغال http://0.0.0.0:${PORT}`))
