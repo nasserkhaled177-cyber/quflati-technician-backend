@@ -34,7 +34,7 @@ model Technician {
   email String? @unique
   id          String   @id @default(cuid())
   name        String 
-  phone       String?  @unique
+  phone       String@unique
   password    String   @default("123456")
   lat         Float?
   lng         Float?
