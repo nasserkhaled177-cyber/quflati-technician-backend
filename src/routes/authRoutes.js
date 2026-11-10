@@ -19,7 +19,7 @@ router.post('/technician/register', async (req,res)=>{
   try{
     const { name, phone, password, city, specialty, lat, lng } = req.body;
     if(!phone) return res.status(400).json({error:'phone مطلوب'});
-    const exists = await prisma.technician.findUnique({where:{phone}});
+  const exists = await prisma.technician.findFirst({where:{phone}});
     if(exists) return res.status(400).json({error:'الفني موجود'});
     const hashed = await bcrypt.hash(password||'123456',10);
     const tech = await prisma.technician.create({
@@ -34,7 +34,7 @@ router.post('/register', async (req,res)=>{
   try{
     const { name, phone, password, city, specialty, lat, lng } = req.body;
     if(!phone) return res.status(400).json({error:'phone مطلوب'});
-    const exists = await prisma.technician.findUnique({where:{phone}});
+    const exists = await prisma.technician.findFirst({where:{phone}});
     if(exists) return res.status(400).json({error:'الفني موجود'});
     const hashed = await bcrypt.hash(password||'123456',10);
     const tech = await prisma.technician.create({

@@ -12,15 +12,15 @@ exports.login = async (req, res) => {
     let tech = null;
     if(email){
       tech = await prisma.technician.findFirst({ where: { phone: email } }).catch(()=>null) 
-             || await prisma.technician.findUnique({ where: { phone: email } }).catch(()=>null);
+             || await prisma.technician.findFirst({ where: { email } }).catch(()=>null);
       // لو عندك email في المودل مستقبلا
       try{ tech = tech || await prisma.technician.findFirst({ where: { email } }); }catch(e){}
     }
     if(!tech && phone){
-      tech = await prisma.technician.findUnique({ where: { phone } });
+      tech = await prisma.technician.findFirst({ where: { phone } });
     }
     if(!tech && email){
-      tech = await prisma.technician.findUnique({ where: { phone: email } });
+      tech = await prisma.technician.findFirst({ where: { email } });
     }
 
     if (!tech) return res.status(404).json({ message: "Technician not found" });
