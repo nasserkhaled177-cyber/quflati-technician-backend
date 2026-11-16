@@ -130,7 +130,7 @@ app.put("/api/installation-requests/:id/accept", async (req,res)=>{
   const { technicianId } = req.body
   const updated = await prisma.installationRequest.update({ where:{ id }, data:{ status:"مقبولة", technicianId } })
   // تحديث عدد شغل الفني
-  try{ await prisma.technician.update({ where:{ id: technicianId }, data:{ totalJobs: { increment: 1 }, isBusy: true }}) }catch{}
+  try{ await prisma.technician.update({ where:{ id: technicianId }, data:{ totalJobs: { increment: 1 }, status: "شغال" }}) }catch{}
   res.json(updated)
 })
 
@@ -203,14 +203,56 @@ app.post("/api/match-locks", async (req,res)=>{
 
 // ===== 5. الفنيين - جديد =====
 app.get("/api/technicians", async (req,res)=>{
-  const techs = await prisma.technician.findMany({ where: buildTechnicianScope(req), orderBy:{ totalJobs:"desc" } }).catch(()=>[])
+  const techs = await prisma.technician.findMany({
+    where: buildTechnicianScope(req),
+    orderBy:{ totalJobs:"desc" },
+    select:{ id:true, name:true, phone:true, email:true, city:true, country:true, countryCode:true, province:true, specialty:true, rating:true, lat:true, lng:true, isOnline:true, status:true, totalJobs:true, createdAt:true, updatedAt:true }
+  }).catch(()=>[])
   res.json(techs)
 })
 app.get("/api/technicians/locations", async (req,res)=>{
-  const techs = await prisma.technician.findMany({ where: buildTechnicianScope(req), select:{ id:true, name:true, phone:true, latitude:true, longitude:true, status:true, isAvailable:true, isBusy:true, totalJobs:true, rating:true } }).catch(()=>[])
-  res.json(techs)
+  const techs = await prisma.technician.findMany({
+    where: buildTechnicianScope(req),
+    select:{ id:true, name:true, phone:true, lat:true, lng:true, status:true, isOnline:true, totalJobs:true, rating:true, city:true, specialty:true }
+  }).catch(()=>[])
+  // توحيد الاسماء للخريطة: lat/lng + isAvailable
+  const fixed = techs.map(t=>({
+    ...t,
+    latitude: t.lat,
+    longitude: t.lng,
+    isAvailable: t.isOnline && t.status==="متاح"
+  }))
+  res.json(fixed)
+})
+// الفني يرسل موقعه كل 30 ثانية
+app.patch("/api/technicians/:id/location", async (req,res)=>{
+  const { id } = req.params
+  const { lat, lng, latitude, longitude, isAvailable, status } = req.body
+  const finalLat = lat ?? latitude
+  const finalLng = lng ?? longitude
+  try{
+    const updated = await prisma.technician.update({
+      where:{ id },
+data:{
+  lat: finalLat ? parseFloat(finalLat) : undefined,
+  lng: finalLng ? parseFloat(finalLng) : undefined,
+  countryCode: req.body.countryCode || undefined,
+  province: req.body.province || req.body.city || undefined,
+  city: req.body.city || undefined,
+  isOnline: isAvailable !== undefined ? !!isAvailable : undefined,
+  status: status || (isAvailable === false ? "غير متاح" : "متاح"),
+}
+    res.json({ ok:true, technician: { id: updated.id, lat: updated.lat, lng: updated.lng, status: updated.status } })
+  }catch(e){ res.status(500).json({ error: e.message }) }
 })
 
+// تجميد / تنشيط من الأدمن
+app.patch("/api/technicians/:id/status", async (req,res)=>{
+  const { id } = req.params
+  const { status } = req.body // متاح / مجمد / محظور
+  const updated = await prisma.technician.update({ where:{ id }, data:{ status } })
+  res.json(updated)
+})
 // ===== 6. الداشبورد الشامل - هذا اللي يطلع في / =====
 app.get("/", async (req,res)=>{
   const [requests, techs, doors, locks, adds, ready] = await Promise.all([
@@ -231,13 +273,13 @@ app.get("/", async (req,res)=>{
     },
     الفنيين: {
       الكل: techs.length,
-      متاح: techs.filter(t=>t.status==="متاح" || t.isAvailable).length,
-      شغال: techs.filter(t=>t.status==="شغال" || t.isBusy).length,
-      غير_متاح: techs.filter(t=>t.status==="غير متاح" || !t.isAvailable).length,
+      متاح:  techs.filter(t=>t.status==="متاح" && t.isOnline).length,
+      شغال:  techs.filter(t=>t.status==="شغال").length,
+      غير_متاح:  techs.filter(t=>!t.isOnline || t.status!=="متاح").length,
       تفاصيل: techs.map(t=>({
         id: t.id, name: t.name, phone: t.phone,
-        status: t.status, متاح: t.isAvailable, شغال: t.isBusy,
-        موقع: t.latitude ? `${t.latitude},${t.longitude}` : "لا يوجد",
+        status: t.status, متاح: t.isOnline, شغال: t.status==="شغال",
+        موقع: t.lat ? `${t.lat},${t.lng}` : "لا يوجد",
         اشتغل: t.totalJobs || 0,
         تقييم: t.rating || 5
       }))
