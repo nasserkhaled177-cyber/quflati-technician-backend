@@ -231,22 +231,25 @@ app.patch("/api/technicians/:id/location", async (req,res)=>{
   const finalLat = lat ?? latitude
   const finalLng = lng ?? longitude
   try{
-    const updated = await prisma.technician.update({
-      where:{ id },
-data:{
-  lat: finalLat ? parseFloat(finalLat) : undefined,
-  lng: finalLng ? parseFloat(finalLng) : undefined,
-  countryCode: req.body.countryCode || undefined,
-  province: req.body.province || req.body.city || undefined,
-  city: req.body.city || undefined,
-  isOnline: isAvailable !== undefined ? !!isAvailable : undefined,
-  status: status || (isAvailable === false ? "غير متاح" : "متاح"),
-}
-})
-    res.json({ ok:true, technician: { id: updated.id, lat: updated.lat, lng: updated.lng, status: updated.status } })
+    const current = await prisma.technician.findUnique({ where:{ id }, select:{ locationLocked:true, countryCode:true, province:true, city:true } })
+    const data = {
+      lat: finalLat ? parseFloat(finalLat) : undefined,
+      lng: finalLng ? parseFloat(finalLng) : undefined,
+      isOnline: isAvailable !== undefined ? !!isAvailable : undefined,
+      status: status || (isAvailable === false ? "غير متاح" : "متاح"),
+      lastLocationAt: (finalLat && finalLng) ? new Date() : undefined,
+      lastSeenAt: new Date(),
+    }
+    // لو الدولة مقفلة، لا تغيرها أبداً - حتى لو سافر الفني
+    if(!current?.locationLocked){
+      if(req.body.countryCode) data.countryCode = req.body.countryCode
+      if(req.body.province || req.body.city) data.province = req.body.province || req.body.city
+      if(req.body.city) data.city = req.body.city
+    }
+    const updated = await prisma.technician.update({ where:{ id }, data })
+    res.json({ ok:true, technician: { id: updated.id, lat: updated.lat, lng: updated.lng, status: updated.status, lastLocationAt: updated.lastLocationAt } })
   }catch(e){ res.status(500).json({ error: e.message }) }
 })
-
 // تجميد / تنشيط من الأدمن
 app.patch("/api/technicians/:id/status", async (req,res)=>{
   const { id } = req.params
@@ -254,6 +257,86 @@ app.patch("/api/technicians/:id/status", async (req,res)=>{
   const updated = await prisma.technician.update({ where:{ id }, data:{ status } })
   res.json(updated)
 })
+// تعديل حسابي - الفني يعدل اسمه وصورته وسيرته ومسافة الاستقبال وكلمة السر
+// ممنوع يعدل: country + countryCode + province + city
+app.patch("/api/technicians/:id/profile", async (req,res)=>{
+  const { id } = req.params
+  const { name, phone, photo, bio, specialty, radiusKm, password } = req.body
+  try{
+    const data = {}
+    if(name !== undefined) data.name = name
+    if(phone !== undefined) data.phone = phone
+    if(photo !== undefined) data.photo = photo
+    if(bio !== undefined) data.bio = bio
+    if(specialty !== undefined) data.specialty = specialty
+    if(radiusKm !== undefined) data.radiusKm = parseInt(radiusKm)
+    if(password){
+      const bcrypt = require('bcryptjs')
+      data.password = await bcrypt.hash(password, 10)
+    }
+    const updated = await prisma.technician.update({
+      where:{ id }, data,
+      select:{ id:true, name:true, phone:true, photo:true, bio:true, specialty:true, radiusKm:true, city:true, province:true, country:true, countryCode:true, rating:true, isOnline:true, status:true }
+    })
+    res.json({ ok:true, technician: updated })
+  }catch(e){ res.status(500).json({ error: e.message }) }
+})
+
+// زر متاح / غير متاح - يفتح شفت ويحسب الساعات
+app.patch("/api/technicians/:id/online", async (req,res)=>{
+  const { id } = req.params
+  const { isOnline } = req.body
+  try{
+    if(isOnline){
+      await prisma.technicianShift.create({ data:{ technicianId: id, startedAt: new Date(), status:'open' } })
+      const updated = await prisma.technician.update({ where:{ id }, data:{ isOnline:true, status:'متاح', lastSeenAt: new Date() }, select:{ id:true, name:true, isOnline:true, status:true } })
+      return res.json({ ok:true, technician: updated })
+    } else {
+      const openShift = await prisma.technicianShift.findFirst({ where:{ technicianId: id, status:'open' }, orderBy:{ startedAt:'desc' } })
+      if(openShift){
+        const endedAt = new Date()
+        const durationMin = Math.max(0, Math.round((endedAt - openShift.startedAt)/60000))
+        await prisma.technicianShift.update({ where:{ id: openShift.id }, data:{ endedAt, durationMin, status:'closed' } })
+        await prisma.technician.update({ where:{ id }, data:{ totalWorkMin: { increment: durationMin } } })
+      }
+      const updated = await prisma.technician.update({ where:{ id }, data:{ isOnline:false, status:'غير متاح', lastSeenAt: new Date() }, select:{ id:true, name:true, isOnline:true, status:true } })
+      return res.json({ ok:true, technician: updated })
+    }
+  }catch(e){ res.status(500).json({ error: e.message }) }
+})
+
+// العميل يقيم الفني بعد الطلب
+app.post("/api/technicians/:id/rate", async (req,res)=>{
+  const { id } = req.params
+  const { stars, comment, customerId, customerName, orderId } = req.body
+  try{
+    await prisma.technicianRating.create({ data:{ technicianId: id, customerId: customerId||null, customerName: customerName||null, orderId: orderId||null, stars: parseInt(stars), comment: comment||null } })
+    const all = await prisma.technicianRating.findMany({ where:{ technicianId: id }, select:{ stars:true } })
+    const avg = all.reduce((s,r)=>s+r.stars,0)/all.length
+    const updated = await prisma.technician.update({ where:{ id }, data:{ rating: Math.round(avg*10)/10 }, select:{ id:true, name:true, rating:true } })
+    res.json({ ok:true, technician: updated, totalRatings: all.length })
+  }catch(e){ res.status(500).json({ error: e.message }) }
+})
+
+// العملاء + الأدمن يشوفون تقييمات فني
+app.get("/api/technicians/:id/ratings", async (req,res)=>{
+  try{
+    const rows = await prisma.technicianRating.findMany({ where:{ technicianId: req.params.id }, orderBy:{ createdAt:'desc' }, take: 20 })
+    res.json(rows)
+  }catch(e){ res.status(500).json({ error: e.message }) }
+})
+
+// الأدمن يشوف ساعات فني - متى متاح ومتى غير متاح
+app.get("/api/admin/technicians/:id/shifts", async (req,res)=>{
+  try{
+    const shifts = await prisma.technicianShift.findMany({ where:{ technicianId: req.params.id }, orderBy:{ startedAt:'desc' }, take: 30 })
+    const tech = await prisma.technician.findUnique({ where:{ id: req.params.id }, select:{ id:true, name:true, isOnline:true, status:true, totalWorkMin:true } })
+    const today = new Date().toISOString().slice(0,10)
+    const todayMin = shifts.filter(s=>s.startedAt.toISOString().slice(0,10)===today).reduce((sum,s)=>sum+(s.durationMin||0),0)
+    res.json({ technician: tech, todayMin, todayHours: (todayMin/60).toFixed(1), shifts: shifts.map(s=>({ date: s.startedAt.toISOString().slice(0,10), from: s.startedAt.toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'}), to: s.endedAt ? s.endedAt.toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'}) : 'لسه متاح', durationMin: s.durationMin })) })
+  }catch(e){ res.status(500).json({ error: e.message }) }
+})
+
 // ===== 6. الداشبورد الشامل - هذا اللي يطلع في / =====
 app.get("/", async (req,res)=>{
   const [requests, techs, doors, locks, adds, ready] = await Promise.all([
