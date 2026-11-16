@@ -242,6 +242,7 @@ data:{
   isOnline: isAvailable !== undefined ? !!isAvailable : undefined,
   status: status || (isAvailable === false ? "غير متاح" : "متاح"),
 }
+})
     res.json({ ok:true, technician: { id: updated.id, lat: updated.lat, lng: updated.lng, status: updated.status } })
   }catch(e){ res.status(500).json({ error: e.message }) }
 })
