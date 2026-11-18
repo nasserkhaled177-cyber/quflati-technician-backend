@@ -261,27 +261,29 @@ app.patch("/api/technicians/:id/status", async (req,res)=>{
 // ممنوع يعدل: country + countryCode + province + city
 app.patch("/api/technicians/:id/profile", async (req,res)=>{
   const { id } = req.params
-  const { name, phone, photo, bio, specialty, radiusKm, password } = req.body
+  // ✅ phone شلناه - ثابت ما يتغير من البروفايل - يجي من التوكن
+  const { name, photo, bio, specialty, radiusKm, password, email } = req.body
   try{
     const data = {}
     if(name !== undefined) data.name = name
-    if(phone !== undefined) data.phone = phone
+    // ✅ photo يقبل null عشان الحذف - اذا null تنحذف
     if(photo !== undefined) data.photo = photo
     if(bio !== undefined) data.bio = bio
     if(specialty !== undefined) data.specialty = specialty
     if(radiusKm !== undefined) data.radiusKm = parseInt(radiusKm)
+    if(email !== undefined) data.email = email
     if(password){
       const bcrypt = require('bcryptjs')
       data.password = await bcrypt.hash(password, 10)
     }
     const updated = await prisma.technician.update({
       where:{ id }, data,
-      select:{ id:true, name:true, phone:true, photo:true, bio:true, specialty:true, radiusKm:true, city:true, province:true, country:true, countryCode:true, rating:true, isOnline:true, status:true }
+      select:{ id:true, name:true, phone:true, photo:true, bio:true, specialty:true, radiusKm:true, city:true, province:true, country:true, countryCode:true, rating:true, email:true,
+    isOnline:true, status:true }
     })
     res.json({ ok:true, technician: updated })
   }catch(e){ res.status(500).json({ error: e.message }) }
 })
-
 // زر متاح / غير متاح - يفتح شفت ويحسب الساعات
 app.patch("/api/technicians/:id/online", async (req,res)=>{
   const { id } = req.params
