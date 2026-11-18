@@ -290,7 +290,11 @@ app.patch("/api/technicians/:id/online", async (req,res)=>{
   const { isOnline } = req.body
   try{
     if(isOnline){
-      await prisma.technicianShift.create({ data:{ technicianId: id, startedAt: new Date(), status:'open' } })
+      // ✅ اذا هو اصلا متاح وعنده شفت مفتوح - لا نفتح شفت ثاني - نحدث lastSeenAt بس
+      const already = await prisma.technicianShift.findFirst({ where:{ technicianId: id, status:'open' }, orderBy:{ startedAt:'desc' } })
+      if(!already){
+        await prisma.technicianShift.create({ data:{ technicianId: id, startedAt: new Date(), status:'open' } })
+      }
       const updated = await prisma.technician.update({ where:{ id }, data:{ isOnline:true, status:'متاح', lastSeenAt: new Date() }, select:{ id:true, name:true, isOnline:true, status:true } })
       return res.json({ ok:true, technician: updated })
     } else {
@@ -306,6 +310,35 @@ app.patch("/api/technicians/:id/online", async (req,res)=>{
     }
   }catch(e){ res.status(500).json({ error: e.message }) }
 })
+
+// ✅ نبضة - الفرونت يرسلها كل 5 دقايق وهو فاتح التطبيق - عشان نعرف انه موجود - ولا نطفيه
+app.patch("/api/technicians/:id/heartbeat", async (req,res)=>{
+  try{
+    const { id } = req.params
+    await prisma.technician.update({ where:{ id }, data:{ lastSeenAt: new Date() } })
+    res.json({ ok:true })
+  }catch(e){ res.status(500).json({ error: e.message }) }
+})
+
+// ✅ اوتو اوفلاين - كل 10 دقايق يشيك - مين له 6 ساعات ما دخل - يخليه غير متاح تلقائي - ويقفل شفته ويحسب ساعات شغله
+setInterval(async ()=>{
+  try{
+    const sixHoursAgo = new Date(Date.now() - 6*60*60*1000)
+    const stale = await prisma.technician.findMany({ where:{ isOnline:true, lastSeenAt:{ lt: sixHoursAgo } }, select:{ id:true } })
+    if(!stale.length) return
+    for(const t of stale){
+      const openShift = await prisma.technicianShift.findFirst({ where:{ technicianId: t.id, status:'open' }, orderBy:{ startedAt:'desc' } })
+      if(openShift){
+        const endedAt = new Date()
+        const durationMin = Math.max(0, Math.round((endedAt - openShift.startedAt)/60000))
+        await prisma.technicianShift.update({ where:{ id: openShift.id }, data:{ endedAt, durationMin, status:'closed' } })
+        await prisma.technician.update({ where:{ id: t.id }, data:{ totalWorkMin: { increment: durationMin } } })
+      }
+      await prisma.technician.update({ where:{ id: t.id }, data:{ isOnline:false, status:'غير متاح', lastSeenAt: new Date() } })
+      console.log('⏰ auto-offline:', t.id, '- له 6 ساعات ما دخل')
+    }
+  }catch(e){ console.log('auto-offline error', e.message) }
+}, 10*60*1000)
 
 // العميل يقيم الفني بعد الطلب
 app.post("/api/technicians/:id/rate", async (req,res)=>{
