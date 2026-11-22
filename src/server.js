@@ -6,7 +6,7 @@ const path = require("path")
 const fs = require("fs")
 const { PrismaClient } = require("@prisma/client")
 const jwt = require("jsonwebtoken")
-
+const authRoutes = require("./routes/authRoutes")
 const app = express()
 const prisma = new PrismaClient()
 const PORT = process.env.PORT || 3002
@@ -411,5 +411,6 @@ app.get("/", async (req,res)=>{
 })
 
 app.use(require("./routes/index"))
-app.use("/auth", require("./routes/authRoutes"))
+app.use("/auth", authRoutes)
+app.use("/api/auth", authRoutes)
 app.listen(PORT, "0.0.0.0", ()=> console.log(`🚀 فني باكند شغال http://0.0.0.0:${PORT}`))
