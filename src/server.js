@@ -253,8 +253,15 @@ app.patch("/api/technicians/:id/location", async (req,res)=>{
 // تجميد / تنشيط من الأدمن
 app.patch("/api/technicians/:id/status", async (req,res)=>{
   const { id } = req.params
-  const { status } = req.body // متاح / مجمد / محظور
-  const updated = await prisma.technician.update({ where:{ id }, data:{ status } })
+  const { status } = req.body // متاح / موقوف / معلق / محظور
+  const isSuspended = status === 'موقوف' || status === 'معلق' || status === 'محظور' || status === 'مجمد'
+  const updated = await prisma.technician.update({
+    where:{ id },
+    data:{
+      status,
+      isOnline: isSuspended ? false : (status === 'متاح' ? true : undefined),
+    }
+  })
   res.json(updated)
 })
 // تعديل حسابي - الفني يعدل اسمه وصورته وسيرته ومسافة الاستقبال وكلمة السر
